@@ -3,8 +3,11 @@ import pyglet
 from math import *
 from pyglet.math import Vec2, Vec3, Mat4, clamp
 from pyglet.graphics.shader import Shader, ShaderProgram
+from pyglet.graphics.vertexdomain import IndexedVertexList
 
-# Flipped view-matrix
+# Target window fps
+TARGET_FPS = 240
+# Y-axis flipped view-matrix
 FLIP = Mat4(
     a=1, b=0, c=0, d=0,
     e=0, f=-1, g=0, h=0,
@@ -14,13 +17,13 @@ FLIP = Mat4(
 
 class Camera():
     def __init__(self):
-        self.position = Vec3(20.0, 0.0, 20.0)
+        self.position = Vec3(20.0, 20.0, -20.0)
 
         self.speed = 20.0
         self.scroll_speed = self.speed*4
         self.sensitivity = 0.2
-        self.yaw = 0.0
-        self.pitch = 0.0
+        self.yaw = pi/4
+        self.pitch = -radians(40)
 
         self.motion = Vec2()
         self.scroll = 0.0
@@ -55,6 +58,7 @@ class Camera():
         if self.buttons[65507]:
             speed *= 2
 
+        # Wasd-movement
         if self.buttons[119]:
             forw = self.forward()
             self.position += forw * speed * delta
@@ -67,6 +71,8 @@ class Camera():
         if self.buttons[100]:
             right = self.right()
             self.position -= right * speed * delta
+        
+        # Down-Up-movement
         if self.buttons[32]:
             self.position += Vec3(0.0, 1.0, 0.0) * speed * delta
         if self.buttons[65505]:
@@ -98,6 +104,7 @@ class Camera():
     def on_scroll(self, dy):
         self.scroll += dy
 
+    # Flipped view matrix
     def view(self) -> Mat4:
         return FLIP @ Mat4.from_translation(self.position)
     
@@ -105,30 +112,16 @@ class Camera():
         return Mat4.perspective_projection(
             width/height, z_near=0.1, z_far=1000, fov=70.0
         ).rotate(-self.pitch, Vec3(1.0, 0.0, 0.0)).rotate(self.yaw, Vec3(0.0, 1.0, 0.0))
-        
-TARGET_FPS = 240
-class Window(pyglet.window.Window):
-    def __init__(self):
-        super().__init__(vsync=False, width=700, height=500, resizable=True, caption='Simulations')
 
-        # Setup shader
-        self.setup()
-        self.camera = Camera()
+class Scene:
+    def __init__(self, program: ShaderProgram):
+        self.program = program
 
-        self.info = pyglet.text.Label('',
-            font_name='Arial',
-            font_size=18,
-            multiline=True,
-            width=2000,
-            x=0, y=self.height,
-            anchor_x='left', anchor_y='top'
-        )
-
-        self.add_hoocks()
-        # All primitives vertices
+        # All primitives (triangles) vertices
         self.batch = pyglet.graphics.Batch()
+        self.objects = []
 
-        self.square = self.program.vertex_list_indexed(
+        self.cube = self.program.vertex_list_indexed(
             count=8,
             mode=pyglet.gl.GL_TRIANGLES,
             indices = (
@@ -152,9 +145,47 @@ class Window(pyglet.window.Window):
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
             )),
-            colors=('Bn', [128, 255, 255, 255]*8)
+            colors=('Bn', [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255]*2)
+        )
+    
+    def insert(self):
+        ...
+
+    # Enable opengl features
+    def start(self):
+        pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST)
+
+    # Disable opengl features
+    def end(self):
+        pyglet.gl.glDisable(pyglet.gl.GL_DEPTH_TEST)
+
+    def draw(self):
+        self.start()
+        self.batch.draw()
+        self.end()
+
+class Window(pyglet.window.Window):
+    def __init__(self):
+        super().__init__(vsync=True, width=700, height=500, resizable=True, caption='Simulations')
+        self.set_minimum_size(10, 10)
+
+        # Setup shader
+        self.setup()
+        # Setup camera
+        self.camera = Camera()
+        self.scene = Scene(self.program)
+
+        # Create debug info text
+        self.info = pyglet.text.Label('',
+            font_name='Arial',
+            font_size=18,
+            multiline=True,
+            width=2000,
+            x=0, y=self.height,
+            anchor_x='left', anchor_y='top'
         )
 
+        self.add_hoocks()
         self.lock = False
 
     def update_info(self, delta: float):
@@ -192,6 +223,11 @@ class Window(pyglet.window.Window):
         if self.lock:
             self.camera.on_pressed(symbol)
 
+        # If F11
+        if symbol == 65480:
+            self.set_fullscreen(not(self.fullscreen))
+            self.set_exclusive_mouse(False)
+
         # If ESC
         if symbol == 65307:
             self.lock = not(self.lock)
@@ -216,7 +252,8 @@ class Window(pyglet.window.Window):
         self.program['projection'] = self.camera.projection(self.width, self.height)
 
         # Render vertices
-        self.batch.draw()
+        
+        self.scene.draw()
         self.info.draw()
 
 window = Window()
