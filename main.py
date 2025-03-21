@@ -19,11 +19,12 @@ class Camera():
     def __init__(self):
         self.position = Vec3(20.0, 20.0, -20.0)
 
-        self.speed = 20.0
-        self.scroll_speed = self.speed*4
+        self.speed = 40.0
+        self.scroll_speed = self.speed*2
         self.sensitivity = 0.2
         self.yaw = pi/4
         self.pitch = -radians(40)
+        self.fov = 70.0
 
         self.motion = Vec2()
         self.scroll = 0.0
@@ -37,6 +38,8 @@ class Camera():
             115: False,
             # D
             100: False,
+            # F
+            102: False,
             # Space
             32: False,
             # LShift
@@ -78,17 +81,21 @@ class Camera():
         if self.buttons[65505]:
             self.position += Vec3(0.0, -1.0, 0.0) * speed * delta
 
-        if self.scroll:
+        # If F-scroll
+        if self.buttons[102]:
+            self.fov -= self.scroll
+            self.fov = round(clamp(self.fov, 30.0, 145.0))
+        elif self.scroll:
             forw = self.forward()
-            self.position +=  forw * self.scroll_speed * self.scroll 
-            self.scroll = 0.0
-
+            self.position +=  forw * self.scroll_speed * self.scroll
+        
         # Rotate camera
         self.yaw += radians(self.motion.x) * self.sensitivity
         self.pitch += radians(self.motion.y) * self.sensitivity
         self.pitch = clamp(self.pitch, -pi/2, pi/2)
 
         self.motion = Vec2()
+        self.scroll = 0.0
 
     def on_pressed(self, symbol: int):
         if symbol in self.buttons:
@@ -108,52 +115,71 @@ class Camera():
     def view(self) -> Mat4:
         return FLIP @ Mat4.from_translation(self.position)
     
+    # Camera projection matrix
     def projection(self, width: int, height: int) -> Mat4:
         return Mat4.perspective_projection(
-            width/height, z_near=0.1, z_far=1000, fov=70.0
+            width/height, z_near=0.1, z_far=1000, fov=self.fov
         ).rotate(-self.pitch, Vec3(1.0, 0.0, 0.0)).rotate(self.yaw, Vec3(0.0, 1.0, 0.0))
 
+def cube(program: ShaderProgram, batch, pos: Vec3) -> IndexedVertexList:
+    vertices = [
+        -10.0, -10.0, 10.0, 10.0, -10.0, 10.0, # 0 1
+        -10.0, 10.0, 10.0, 10.0, 10.0, 10.0, # 2 3
+        -10.0, -10.0, -10.0, 10.0, -10.0, -10.0, # 4 5
+        -10.0, 10.0, -10.0, 10.0, 10.0, -10.0 # 6 7
+    ]
+
+    p = list(pos)
+    for i in range(3):
+        for j in range(i, len(vertices), 3):
+            vertices[j] += p[i]
+
+    return program.vertex_list_indexed(
+        count=8,
+        mode=pyglet.gl.GL_TRIANGLES,
+        indices = (
+            2, 6, 7, 2, 3, 7,
+            0, 4, 5, 0, 1, 5,
+            0, 2, 6, 0, 4, 6,
+            1, 3, 7, 1, 5, 7,
+            0, 2, 3, 0, 1, 3,
+            4, 6, 7, 4, 5, 7
+        ),
+        batch=batch,
+        vertices=('f', vertices),
+        normals=('f', (
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        )),
+        colors=('Bn', [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255]*2)
+    )
+    
 class Scene:
     def __init__(self, program: ShaderProgram):
         self.program = program
+        self.depth = True
 
         # All primitives (triangles) vertices
         self.batch = pyglet.graphics.Batch()
         self.objects = []
 
-        self.cube = self.program.vertex_list_indexed(
-            count=8,
-            mode=pyglet.gl.GL_TRIANGLES,
-            indices = (
-                2, 6, 7, 2, 3, 7,
-                0, 4, 5, 0, 1, 5,
-                0, 2, 6, 0, 4, 6,
-                1, 3, 7, 1, 5, 7,
-                0, 2, 3, 0, 1, 3,
-                4, 6, 7, 4, 5, 7
-            ),
-            batch=self.batch,
-            vertices=('f', (
-                -10.0, -10.0, 10.0, 10.0, -10.0, 10.0, # 0 1
-                -10.0, 10.0, 10.0, 10.0, 10.0, 10.0, # 2 3
-                -10.0, -10.0, -10.0, 10.0, -10.0, -10.0, # 4 5
-                -10.0, 10.0, -10.0, 10.0, 10.0, -10.0 # 6 7
-            )),
-            normals=('f', (
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-            )),
-            colors=('Bn', [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255]*2)
-        )
-    
+        for x in range(-200, 201, 40):
+            for z in range(-200, 201, 40):
+                cube(self.program, self.batch, Vec3(x, 0.0, z))
+        
     def insert(self):
         ...
 
+    def on_pressed(self, symbol: int):
+        if symbol == 117: # U-key
+            self.depth = not(self.depth)
+
     # Enable opengl features
     def start(self):
-        pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST)
+        if self.depth:
+            pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST)
 
     # Disable opengl features
     def end(self):
@@ -178,7 +204,7 @@ class Window(pyglet.window.Window):
         # Create debug info text
         self.info = pyglet.text.Label('',
             font_name='Arial',
-            font_size=18,
+            font_size=15,
             multiline=True,
             width=2000,
             x=0, y=self.height,
@@ -198,7 +224,8 @@ class Window(pyglet.window.Window):
         rot = list(map(lambda x: floor(degrees(x)), [self.camera.pitch, self.camera.yaw]))
 
         self.info.y = self.height
-        self.info.text = f"FPS: {fps} \nPosition: {pos} \nRotation: {rot}"
+        fv = self.camera.fov
+        self.info.text = f"FPS: {fps} \nPosition: {pos} \nRotation: {rot} \nFov: {fv}"
 
     # Update mouse lock
     def update_lock(self, delta):
@@ -221,6 +248,7 @@ class Window(pyglet.window.Window):
     # Keyboard events
     def on_key_press(self, symbol, _modifiers):
         if self.lock:
+            self.scene.on_pressed(symbol)
             self.camera.on_pressed(symbol)
 
         # If F11
