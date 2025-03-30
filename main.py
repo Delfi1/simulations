@@ -1,11 +1,11 @@
 import typing
 import pyglet
 from math import *
+from random import randint
 from pyglet.graphics.shader import Shader, ShaderProgram
 from pyglet.math import *
-import time
 
-from objects import *
+import objects
 
 # Global pressed buttons
 class Buttons:
@@ -86,7 +86,7 @@ class Camera:
             self.fov = round(clamp(self.fov, 30.0, 145.0))
         elif self.scroll:
             forw = self.forward()
-            self.position +=  forw * self.scroll_speed * self.scroll
+            self.position += forw * self.scroll_speed * self.scroll
         
         # Rotate camera
         self.yaw += radians(self.motion.x) * self.sensitivity
@@ -117,46 +117,45 @@ class Camera:
     # Camera projection matrix
     def projection(self, width: int, height: int) -> Mat4:
         return Mat4.perspective_projection(
-            width/height, z_near=0.1, z_far=10000, fov=self.fov
+            width/height, z_near=0.1, z_far=1000000, fov=self.fov
         ).rotate(-self.pitch, Vec3(1.0, 0.0, 0.0)).rotate(self.yaw, Vec3(0.0, 1.0, 0.0))
 
 class Scene:
     def __init__(self):
         self.camera = Camera()
-        self.objects: typing.List[Object] = list()
-        self.batch = pyglet.graphics.Batch()
+        self.objects: typing.List[objects.Object] = list()
+        self.render_objects: typing.List[objects.RenderObject] = list()
 
-        self.init_shader()
+        self.batch = pyglet.graphics.Batch()        
+        self.init_renderer()
 
-    def insert(self, object: Object):
-        object.setup(self.program, self.batch)
-        self.objects.append(object)
-
-    # Load shaders
-    def init_shader(self):
+    def init_renderer(self):
         with open('vertex.glsl') as file:
             vert_shader = Shader(file.read(), 'vertex')
         with open('fragment.glsl') as file:
             frag_shader = Shader(file.read(), 'fragment')
         self.program = ShaderProgram(vert_shader, frag_shader)
-
-    # Update all objects
-    def update(self, delta: float):
-        # Update camera and objects
+    
+    def insert(self, obj: objects.Object, model: objects.RenderObject):
+        model.setup(self.program, self.batch, obj)
         
+        self.objects.append(obj)
+        self.render_objects.append(model)
+
+    def update(self, delta: float):
         self.camera.update(delta)
         for obj in self.objects:
-            obj.tick(delta)
+            obj.update(delta)
 
-    # Begin frame states
     def begin(self):
+        pyglet.gl.glEnable(pyglet.gl.GL_BLEND)
         pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST)
-
-    # End frame states
+    
     def end(self):
         pyglet.gl.glDisable(pyglet.gl.GL_DEPTH_TEST)
+        pyglet.gl.glDisable(pyglet.gl.GL_BLEND)
 
-    # Make Frame (Batch) and draw
+    # Prepare frame and draw
     def draw(self, width: int, height: int):
         self.program['view'] = self.camera.view()
         self.program['projection'] = self.camera.projection(width, height)
@@ -169,10 +168,21 @@ class Window(pyglet.window.Window):
     def __init__(self):
         super().__init__(resizable=True, vsync=True, width=700, height=500, caption="Simulations")
         self.set_minimum_size(5, 5)
-
+        
         self.scene = Scene()
-        for x in range(0, 401, 40):
-            self.scene.insert(Cube(Vec3(x, 0.0, 0.0)*8, Vec3(1.0, 1.0, 1.0)*(400-x)/40))
+        
+        for x in range(0, 201, 40):
+            self.scene.insert(
+                objects.Object(
+                    position=Vec3(x*200, 0.0, 0.0),
+                    value=0.0,
+                    speed=randint(1000, 5000)/1000,
+                    color=objects.Color(255, 255, 255, 255),
+                    scale=Vec3((40000-x)/400, (40000-x)/400, (40000-x)/400)
+                ),
+                objects.Cube()
+            )
+
         self.lock = False
 
         self.info = pyglet.text.Label('',
@@ -202,6 +212,7 @@ class Window(pyglet.window.Window):
 
     def update(self, delta: float):
         global buttons
+        
         self.scene.update(delta)
         buttons.clear()
     
@@ -250,4 +261,5 @@ class Window(pyglet.window.Window):
 
 buttons = Buttons()
 window = Window()
+
 pyglet.app.run()
